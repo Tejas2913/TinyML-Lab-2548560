@@ -58,7 +58,7 @@ The project implements an end-to-end edge-deployable TinyML pipeline that classi
 ## Repository Structure (Branch: `Lab-1`)
 
 ```
-├── 254856_Tejas_R_M_TinyML_LAB01_Real_Time_Rotational_Dynamics_Edge_AI_Payload_Safety_System.ipynb
+├── 2548560_Tejas_R_M_TinyML_LAB01_Real_Time_Rotational_Dynamics_Edge_AI_Payload_Safety_System.ipynb
 ├── Main_Raw Data.csv
 ├── model_float32.tflite
 ├── model_int8.tflite
@@ -84,6 +84,6 @@ pip install numpy pandas matplotlib seaborn scikit-learn tensorflow
    ```
 2. Open the Jupyter notebook:
    ```bash
-   jupyter notebook 254856_Tejas_R_M_TinyML_LAB01_Real_Time_Rotational_Dynamics_Edge_AI_Payload_Safety_System.ipynb
+   jupyter notebook 2548560_Tejas_R_M_TinyML_LAB01_Real_Time_Rotational_Dynamics_Edge_AI_Payload_Safety_System.ipynb
    ```
 3. Run the notebook cells sequentially. Ensure `Main_Raw Data.csv` remains in the same working directory.
