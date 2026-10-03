@@ -27,7 +27,7 @@ Edge execution and latency benchmarking are **simulated with the TensorFlow Lite
 
 ## System Architecture & Workflow
 
-![Lab 4 Workflow](Lab%204_%20Quantisation-Aware%20Training%20Workflow.png)
+![Lab 4 Workflow](Workflow.png)
 
 Sequence actually implemented in the notebook:
 
@@ -36,25 +36,24 @@ CIFAR-10 Dataset
         ↓
 Image Preprocessing (Resize to 96×96, Normalization)
         ↓
-MobileNetV2 (ImageNet pretrained, α=0.35) + Custom Head
+MobileNetV2 (ImageNet Pretrained, α=0.35) + Custom Head
         ↓
-Float32 Baseline Training
+Train & Evaluate Float32 Baseline
         ↓
-Float32 Evaluation
+ ┌──────┴──────────────────────────┐
+ │                                 │
+ ↓ (PTQ Path)                      ↓ (QAT Path)
+Full INT8 PTQ Calibration        Insert Fake-Quant Nodes (tfmot)
+        ↓                                  ↓
+Evaluate PTQ INT8 Model          QAT Fine-Tuning (Low LR)
+                                           ↓
+                                 Convert to Full INT8 QAT
+                                           ↓
+                                 Evaluate QAT INT8 Model
+ │                                 │
+ └──────┬──────────────────────────┘
         ↓
-Full INT8 PTQ (Representative Dataset Calibration)
-        ↓
-PTQ INT8 Evaluation
-        ↓
-Quantization-Aware Training (tfmot Fake-Quant Nodes)
-        ↓
-QAT Fine-Tuning (Low Learning Rate)
-        ↓
-Full INT8 QAT Conversion
-        ↓
-QAT INT8 Evaluation
-        ↓
-Float32 vs PTQ INT8 vs QAT INT8 Comparison
+Comparative Benchmarking (Float32 vs PTQ vs QAT)
 ```
 
 ---
@@ -194,7 +193,7 @@ All three TFLite models are evaluated on the identical 1,000-sample CIFAR-10 tes
 ├── model_float32.tflite
 ├── model_ptq_int8.tflite
 ├── model_qat_int8.tflite
-├── Lab 4_ Quantisation-Aware Training Workflow.png
+├── Workflow.png
 └── README.md
 ```
 
