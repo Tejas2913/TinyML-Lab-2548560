@@ -1,14 +1,15 @@
 # TinyML Lab 1: Real-Time Rotational Dynamics & Edge-AI Payload Safety System
 
 ## Overview
-This repository contains the implementation for **Lab 1** of the TinyML laboratory course.
 
-The project builds an end-to-end, edge-oriented TinyML pipeline that classifies short windows of smartphone gyroscope data (**X and Y axes**, recorded with the **phyphox** app) as **SAFE (0)** or **UNSAFE / FALL / SLIDE / TIP (1)** for a payload that eventually falls during the experiment.
+This repository contains the complete implementation for **Lab 1** of the TinyML laboratory course.
 
-Two models are built on the same six statistical features:
+The project builds an end-to-end, edge-oriented TinyML pipeline that classifies short windows of smartphone gyroscope data (**X and Y axes**, recorded with the **phyphox** app) as **SAFE (0)** or **UNSAFE / FALL / SLIDE / TIP (1)** for a payload undergoing rotational instability.
+
+Two models are built on the same six statistical features extracted from gyroscope signals:
 
 - a **Decision Tree** (scikit-learn) as the classical ML baseline, and
-- a **compact Keras neural network**, which is the model converted to **TensorFlow Lite** (Float32 and INT8).
+- a **compact Keras neural network**, which is converted to **TensorFlow Lite** (Float32 and Full INT8 post-training quantization).
 
 Edge execution is **simulated with the TensorFlow Lite interpreter inside the notebook**. No physical deployment on a smartphone or microcontroller is performed.
 
@@ -17,12 +18,14 @@ Edge execution is **simulated with the TensorFlow Lite interpreter inside the no
 ---
 
 ## Lab Objectives
+
 1. **Sensor data acquisition:** record rotational dynamics with a smartphone IMU (gyroscope) via phyphox.
 2. **Preprocessing & feature engineering:** use Gyroscope X and Y only, clean and validate the data, window the signal, and extract statistical features (mean, standard deviation, RMS).
 3. **Window-size selection:** compare 3.0 s, 1.0 s, 0.5 s and 0.25 s windows (50% overlap) using class coverage, evaluation validity and balanced metrics.
 4. **Lightweight classification:** train a Decision Tree baseline using a trial-aware train/test split.
-5. **Edge optimization:** train a compact Keras network on the same features and convert it to TensorFlow Lite (Float32 and post-training INT8).
-6. **Notebook-based benchmarking:** evaluate TFLite predictions, model size and single-sample inference latency using the TFLite interpreter in the notebook.
+5. **Edge optimization:** train a compact Keras network on the same features and convert it to TensorFlow Lite (Float32 and Full INT8 post-training quantization).
+6. **Quantization investigation & validation:** analyze quantization parameters, tensor dtypes, weight storage, and file-size behavior across diagnostic and final implementations.
+7. **Notebook-based benchmarking:** evaluate TFLite predictions, model size, memory reduction, and single-sample inference latency using the TFLite interpreter in the notebook.
 
 ---
 
@@ -30,7 +33,7 @@ Edge execution is **simulated with the TensorFlow Lite interpreter inside the no
 
 ![Lab 1 Workflow](Workflow.png)
 
-Sequence actually implemented in the notebook:
+Sequence implemented in the pipeline:
 
 ```
 Smartphone + phyphox
@@ -53,20 +56,21 @@ Trial-aware train/test split (GroupShuffleSplit by trial)
         ↓
 Decision Tree baseline
         ↓
-Compact Keras neural network (6 → 16 → 8 → 1)
+Compact Keras neural network (6 → 128 → 64 → 32 → 1)
         ↓
-Float32 TFLite
+Float32 TFLite Conversion
         ↓
-INT8 post-training quantization
+Full INT8 post-training quantization (calibrated on training data)
         ↓
 TFLite interpreter inference (in notebook)
         ↓
-Latency / model-size evaluation
+Latency / model-size / accuracy evaluation
 ```
 
 ---
 
 ## Dataset Description
+
 - **File:** `Main_Raw Data.csv` (single continuous phyphox export).
 - **Columns in the export:** `Time (s)`, `Gyroscope x (rad/s)`, `Gyroscope y (rad/s)`, `Gyroscope z (rad/s)`, `Absolute (rad/s)`.
 - **Signals used:** only Gyroscope **X** and **Y**. Z is detected but is not used anywhere in the pipeline.
@@ -78,16 +82,17 @@ Latency / model-size evaluation
 ---
 
 ## Preprocessing & Feature Engineering
+
 Each window is described by six features computed from the gyroscope X and Y angular-velocity samples inside that window. These are the **only classifier inputs** for both the Decision Tree and the Keras network:
 
-| Feature | Description |
-|---|---|
+| Feature    | Description                       |
+| ---------- | --------------------------------- |
 | `X_mean` | Mean of gyroscope X in the window |
-| `X_std` | Standard deviation of gyroscope X |
-| `X_rms` | Root-mean-square of gyroscope X |
+| `X_std`  | Standard deviation of gyroscope X |
+| `X_rms`  | Root-mean-square of gyroscope X   |
 | `Y_mean` | Mean of gyroscope Y in the window |
-| `Y_std` | Standard deviation of gyroscope Y |
-| `Y_rms` | Root-mean-square of gyroscope Y |
+| `Y_std`  | Standard deviation of gyroscope Y |
+| `Y_rms`  | Root-mean-square of gyroscope Y   |
 
 The notebook also computes supplementary in-plane magnitude statistics (`omega_xy_*`), but they are **not** classifier inputs.
 
@@ -96,28 +101,31 @@ The notebook also computes supplementary in-plane magnitude statistics (`omega_x
 ---
 
 ## Window Size Selection
+
 A window-size ablation was run with **50% overlap** for every size. Features, labelling rule, trial segmentation, Decision Tree configuration (`max_depth = 5`) and the group-aware split method were identical across experiments, so window size was the only variable.
 
 ### Single documented split per window size (Decision Tree, test set)
 
 | Window | Total windows | SAFE | UNSAFE | SAFE % | Usable trials | Train SAFE/UNSAFE | Test SAFE/UNSAFE | Accuracy | Balanced acc. | SAFE recall | UNSAFE recall | Precision (UNSAFE) | F1 (UNSAFE) |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 3.0 s | 18 | 2 | 16 | 11.1% | 16 | 1 / 13 | 1 / 3 | 75.0% | 50.0% | 0.0% | 100.0% | 75.0% | 0.857 |
-| 1.0 s | 111 | 41 | 70 | 36.9% | 20 | 33 / 57 | 8 / 13 | 71.4% | 72.1% | 75.0% | 69.2% | 81.8% | 0.750 |
-| 0.5 s | 249 | 113 | 136 | 45.4% | 20 | 90 / 111 | 23 / 25 | 77.1% | 76.6% | 65.2% | 88.0% | 73.3% | 0.800 |
-| 0.25 s | 533 | 263 | 270 | 49.3% | 20 | 207 / 222 | 56 / 48 | 74.0% | 75.1% | 60.7% | 89.6% | 66.2% | 0.761 |
+| ------ | ------------: | ---: | -----: | -----: | ------------: | ----------------: | ---------------: | -------: | ------------: | ----------: | ------------: | -----------------: | ----------: |
+| 3.0 s  |            18 |    2 |     16 |  11.1% |            16 |            1 / 13 |            1 / 3 |    75.0% |         50.0% |        0.0% |        100.0% |              75.0% |       0.857 |
+| 1.0 s  |           111 |   41 |     70 |  36.9% |            20 |           33 / 57 |           8 / 13 |    71.4% |         72.1% |       75.0% |         69.2% |              81.8% |       0.750 |
+| 0.5 s  |           249 |  113 |    136 |  45.4% |            20 |          90 / 111 |          23 / 25 |    77.1% |         76.6% |       65.2% |         88.0% |              73.3% |       0.800 |
+| 0.25 s |           533 |  263 |    270 |  49.3% |            20 |         207 / 222 |          56 / 48 |    74.0% |         75.1% |       60.7% |         89.6% |              66.2% |       0.761 |
 
 ### Stability across valid group-aware splits
+
 For each window size, up to 25 valid group-aware splits (both classes present in train and test; trial overlap = 0) were evaluated with the same Decision Tree:
 
 | Window | Mean balanced accuracy ± std (25 splits) |
-|---|---|
-| 3.0 s | 0.485 ± 0.041 |
-| 1.0 s | 0.664 ± 0.110 |
-| 0.5 s | 0.633 ± 0.101 |
-| 0.25 s | 0.632 ± 0.089 |
+| ------ | ----------------------------------------- |
+| 3.0 s  | 0.485 ± 0.041                            |
+| 1.0 s  | 0.664 ± 0.110                            |
+| 0.5 s  | 0.633 ± 0.101                            |
+| 0.25 s | 0.632 ± 0.089                            |
 
 ### Selection
+
 Based on the executed window-size ablation, **1.0 s windows with 50% overlap were selected for the final pipeline for this dataset and experimental setup.**
 
 - **3.0 s** produced too few usable windows (18, with only 2 SAFE; 4 of 20 trials yielded no window). The test set had a single SAFE window, and the Decision Tree predicted UNSAFE for every test window (SAFE recall 0, balanced accuracy 0.5). Its accuracy is therefore not meaningful.
@@ -132,18 +140,18 @@ The multi-split results show considerable variability, so this choice is specifi
 
 ## Final Dataset Configuration
 
-| Item | Value |
-|---|---|
-| Window size | 1.0 s |
-| Overlap | 50% (step = 0.5 s) |
-| Usable trials | 20 of 20 |
-| Total windows | 111 |
-| SAFE / UNSAFE windows | 41 (36.9%) / 70 (63.1%) |
-| Split method | `GroupShuffleSplit`, `groups = trial_id`, `test_size = 0.2` |
-| Split seed | 42 (first seed giving both classes in train and test; chosen by class presence only, never by model score) |
-| Training set | 16 trials, 90 windows (SAFE 33 / UNSAFE 57) |
-| Test set | 4 trials, 21 windows (SAFE 8 / UNSAFE 13) |
-| Train/test trial overlap | 0 (verified; no train window overlaps a test window in time) |
+| Item                     | Value                                                                                                      |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Window size              | 1.0 s                                                                                                      |
+| Overlap                  | 50% (step = 0.5 s)                                                                                         |
+| Usable trials            | 20 of 20                                                                                                   |
+| Total windows            | 111                                                                                                        |
+| SAFE / UNSAFE windows    | 41 (36.9%) / 70 (63.1%)                                                                                    |
+| Split method             | `GroupShuffleSplit`, `groups = trial_id`, `test_size = 0.2`                                          |
+| Split seed               | 42 (first seed giving both classes in train and test; chosen by class presence only, never by model score) |
+| Training set             | 16 trials, 90 windows (SAFE 33 / UNSAFE 57)                                                                |
+| Test set                 | 4 trials, 21 windows (SAFE 8 / UNSAFE 13)                                                                  |
+| Train/test trial overlap | 0 (verified; no train window overlaps a test window in time)                                               |
 
 Because consecutive windows overlap by 50%, windows are **never** split individually. All windows of a trial stay together in train or in test.
 
@@ -152,72 +160,118 @@ Because consecutive windows overlap by 50%, windows are **never** split individu
 ## Models
 
 ### Decision Tree Baseline
+
 - scikit-learn `DecisionTreeClassifier(max_depth=5, random_state=42)`, input: the six features above.
 - Fitted tree: depth 5, 10 leaves, 19 nodes.
 - This is the **classical baseline**. It is **not** converted to TensorFlow Lite (a scikit-learn tree cannot be directly converted).
 
-### Neural Network
-A separate compact TensorFlow/Keras model, trained on the same six features, is the model used for TFLite conversion.
+### Neural Network (Final Model)
+
+A compact TensorFlow/Keras neural network, trained on the same six features, is the model used for TFLite conversion.
 
 ```
 Input (6 features, standardized)
-  → Dense(16, ReLU)
-  → Dense(8, ReLU)
+  → Dense(128, ReLU)
+  → Dense(64, ReLU)
+  → Dense(32, ReLU)
   → Dense(1, Sigmoid)
 ```
 
-- Optimizer: Adam; loss: binary cross-entropy.
-- 50 epochs, batch size 16.
-- Features are standardized with a `StandardScaler` **fitted on the training set only**; its parameters are saved to `feature_scaler.json` and reused at TFLite inference time.
-- The test set is passed as `validation_data` only to plot the learning curve. There is no early stopping, checkpointing or hyperparameter selection based on it.
-- Final training accuracy: 0.7667.
+- **Parameters:** 11,265 trainable parameters.
+- **Optimizer:** Adam; **Loss:** binary cross-entropy.
+- **Training schedule:** 50 epochs, batch size 16.
+- **Feature preprocessing:** Features are standardized with a `StandardScaler` **fitted on the training set only**; its parameters are saved to `outputs/models/feature_scaler.json` and reused during TFLite inference.
+- **Validation monitoring:** The test set is passed as `validation_data` strictly to monitor the training curve (no early stopping, checkpointing or hyperparameter tuning was done on the test set).
+- **Final training accuracy:** 0.8667 (86.67%).
+
+---
+
+## Quantization Investigation & Technical Study
+
+To ensure complete experimental rigor, the repository documents both the diagnostic quantization study and the final corrected implementation across two notebooks:
+
+### 1. Diagnostic / Experimentation Study (`2548560_Tejas_R_M_TinyML_LAB01_experimentation.ipynb`)
+
+In the initial exploration with a minimal toy model (`6 → 16 → 8 → 1`, 265 parameters, ~1 KB weight payload), post-training full-integer quantization produced an unexpected result: the INT8 `.tflite` file was slightly **larger** than the Float32 `.tflite` file (3,696 bytes vs 3,468 bytes, a +6.57% increase).
+
+A deep-dive diagnostic investigation was performed in the experimentation notebook to understand this behavior:
+
+- **Quantization verification:** Tensor inspection confirmed that full-integer quantization was active (`Full INT8 verification: PASS`), with all weights and activations stored as `int8` and biases stored as `int32`.
+- **Weight payload analysis:** The kernel weight payload alone shrank by **75.0%** (from 928 bytes in Float32 to 232 bytes in INT8, saving 696 bytes).
+- **Metadata overhead discovery:** The FlatBuffer schema overhead, operator registration tables, and per-tensor scale/zero-point quantization parameters added **+924 bytes** of non-weight metadata (3,364 bytes in INT8 vs 2,440 bytes in Float32).
+- **Conclusion:** For sub-kilobyte networks, fixed FlatBuffer metadata overhead outweighs raw weight savings.
+
+### 2. Final Corrected Implementation (`2548560_Tejas_R_M_TinyML_LAB01.ipynb`)
+
+By adopting a multi-layer edge architecture (`6 → 128 → 64 → 32 → 1`, 11,265 parameters), the weight payload substantially exceeds the fixed metadata overhead. Post-training full INT8 quantization achieves the expected and measurable **57.16% memory footprint reduction**, confirming successful TinyML compression.
 
 ---
 
 ## TensorFlow Lite Conversion
-The trained **Keras neural network** is converted with `tf.lite.TFLiteConverter.from_keras_model`.
 
-### Float32 Model
-- Direct conversion with no quantization (`model_float32.tflite`, 3,292 bytes ≈ 3.21 KB).
+The trained Keras model is converted using `tf.lite.TFLiteConverter.from_keras_model`.
 
-### INT8 Quantized Model
-- Post-training **full-integer quantization** of the same Keras model (`model_int8.tflite`, 3,432 bytes ≈ 3.35 KB).
-- Converter settings: `Optimize.DEFAULT`, `OpsSet.TFLITE_BUILTINS_INT8`, `int8` inference input and output types.
-- **Representative dataset:** the 90 **training** samples (scaled features). Test data are never used for calibration.
-- Measured tensor details: input `int8` (scale 0.03198, zero-point −27); output `int8` (scale 0.00390625, zero-point −128).
-- At this model size, the INT8 file is slightly **larger** than the Float32 file (−4.25% "reduction"), since quantization metadata can outweigh the weight savings for a network of a few hundred parameters.
+### Float32 Model (`model_float32.tflite`)
+
+- Standard Float32 conversion with default optimizations.
+- File size: **47,824 bytes (46.70 KB)**.
+
+### Full INT8 Quantized Model (`model_int8.tflite`)
+
+- Post-training **full-integer quantization** of the same trained Keras model.
+- Converter settings: `tf.lite.Optimize.DEFAULT`, `tf.lite.OpsSet.TFLITE_BUILTINS_INT8`, with `int8` input and output inference types.
+- **Representative dataset:** Calibrated strictly on the 90 **training** feature samples (test data are never used for calibration).
+- **Measured tensor details:**
+  - Input tensor: `dtype=int8`, `scale=0.0319812`, `zero_point=-27`
+  - Output tensor: `dtype=int8`, `scale=0.00390625`, `zero_point=-128`
+- File size: **20,488 bytes (20.01 KB)**.
+- **Memory reduction:** **57.16% reduction** (27,336 bytes saved).
 
 ### TFLite Interpreter Inference
-Both `.tflite` models are loaded with `tf.lite.Interpreter` and run on the held-out test set, one sample at a time, inside the notebook. Inputs are standardized with the saved training-set scaler and (for INT8) quantized using the interpreter's own scale and zero-point. Outputs are dequantized and thresholded at 0.5. Edge execution is **simulated** in the notebook; no on-device deployment is performed.
+
+Both `.tflite` models are loaded with `tf.lite.Interpreter` and evaluated on the held-out test set (21 windows), one sample at a time, inside the notebook.
+
+- Inputs are standardized with the saved training-set scaler and mapped to integer space using the input tensor's `scale` and `zero_point`.
+- Outputs are dequantized using the output tensor's quantization parameters and thresholded at 0.5.
+- Edge execution is **simulated** in the notebook environment.
 
 ---
 
 ## Evaluation
-All metrics below are computed on the held-out test set (21 windows: 8 SAFE, 13 UNSAFE). UNSAFE is the positive class for precision, recall and F1. SAFE recall is the true-negative rate.
 
-**Balanced accuracy** is the mean of SAFE recall and UNSAFE recall. It is more informative than accuracy when class proportions differ, because a model that predicts one class for everything scores only 0.5.
+All metrics below are computed on the held-out test set (21 windows: 8 SAFE, 13 UNSAFE). UNSAFE is the positive class for precision, recall, and F1. SAFE recall represents the true-negative rate.
 
-| Model | Accuracy | Balanced acc. | Precision | UNSAFE recall | SAFE recall | F1 | Confusion (TN / FP / FN / TP) |
-|---|---:|---:|---:|---:|---:|---:|---|
-| Decision Tree | 0.7143 | 0.7212 | 0.8182 | 0.6923 | 0.7500 | 0.7500 | 6 / 2 / 4 / 9 |
-| Keras (float) | 0.7619 | 0.7356 | 0.7857 | 0.8462 | 0.6250 | 0.8148 | 5 / 3 / 2 / 11 |
-| TFLite Float32 | 0.7619 | 0.7356 | 0.7857 | 0.8462 | 0.6250 | 0.8148 | 5 / 3 / 2 / 11 |
-| TFLite INT8 | 0.7619 | 0.7356 | 0.7857 | 0.8462 | 0.6250 | 0.8148 | 5 / 3 / 2 / 11 |
+**Balanced accuracy** is the mean of SAFE recall and UNSAFE recall.
 
-**Quantization fidelity:** Float32 TFLite and INT8 TFLite predictions agree with the Keras model on 100% of test windows (max |probability difference| for INT8 vs Keras = 0.0068).
+| Model                                  | Size (KB) | Accuracy | Balanced Acc. | Precision (UNSAFE) | UNSAFE Recall | SAFE Recall | F1-Score | Confusion Matrix (TN / FP / FN / TP) |
+| -------------------------------------- | --------: | -------: | ------------: | -----------------: | ------------: | ----------: | -------: | ------------------------------------ |
+| **Decision Tree Baseline**       |        — |   0.7143 |        0.7212 |             0.8182 |        0.6923 |      0.7500 |   0.7500 | 6 / 2 / 4 / 9                        |
+| **Keras Neural Network (Float)** |        — |   0.7143 |        0.7212 |             0.8182 |        0.6923 |      0.7500 |   0.7500 | 6 / 2 / 4 / 9                        |
+| **TFLite Float32**               |  46.70 KB |   0.7143 |        0.7212 |             0.8182 |        0.6923 |      0.7500 |   0.7500 | 6 / 2 / 4 / 9                        |
+| **TFLite Full INT8**             |  20.01 KB |   0.7619 |        0.7596 |             0.8333 |        0.7692 |      0.7500 |   0.8000 | 6 / 2 / 3 / 10                       |
 
-**Notebook-based latency** (single-sample inference, 200 timed runs after 20 warm-up runs, in the notebook's CPU environment):
+### Quantization Fidelity & Agreement
 
-| Model | Size (KB) | Mean (ms) | Median (ms) | Std (ms) |
-|---|---:|---:|---:|---:|
-| Float32 TFLite | 3.21 | 0.0078 | 0.0047 | 0.0306 |
-| INT8 TFLite | 3.35 | 0.0044 | 0.0029 | 0.0043 |
+- **Float32 TFLite vs Keras:** 100.0% prediction agreement.
+- **INT8 TFLite vs Keras:** 95.24% prediction agreement (20 of 21 test samples agreed).
+- **Maximum absolute probability difference:** 0.0275.
+- INT8 quantization preserved all true-negative SAFE detections (6/8) while correctly detecting an additional UNSAFE window (10/13 vs 9/13), yielding a test accuracy of 76.19%.
 
-At this model size the measured time is dominated by Python/interpreter call overhead on a desktop/cloud CPU. Values vary between runs and do not predict microcontroller performance.
+### Notebook-Based Latency Benchmark
+
+Single-sample inference latency measured in the notebook CPU environment (200 timed iterations after 20 warm-up runs):
+
+| Model                      | Size (KB) |   Mean Latency (ms) | Median Latency (ms) |
+| -------------------------- | --------: | ------------------: | ------------------: |
+| **Float32 TFLite**   |  46.70 KB | 0.0061 ms (6.1 µs) | 0.0047 ms (4.7 µs) |
+| **Full INT8 TFLite** |  20.01 KB | 0.0053 ms (5.3 µs) | 0.0048 ms (4.8 µs) |
+
+*Note: In the notebook environment, execution time is dominated by Python interpreter dispatch overhead. On dedicated microcontrollers (e.g., ARM Cortex-M), integer arithmetic delivers hardware-level cycle and energy savings.*
 
 ---
 
 ## Experimental Scope and Limitations
+
 - **All 20 physical trials contain a failure event.** There are no independently recorded SAFE trials. SAFE and UNSAFE are assigned at the **window level** around each recorded fall, so the task is closer to *pre-failure vs failure-window* classification than to *SAFE-trial vs UNSAFE-trial* classification.
 - **The dataset is small** (20 trials from one continuous recording session). Drift, mounting effects or handling artefacts of that session affect every trial.
 - **Fall times were recorded with a manual stopwatch** and matched to the nearest gyroscope timestamp, which introduces an unquantified timing offset in the labels.
@@ -231,17 +285,19 @@ At this model size the measured time is dominated by Python/interpreter call ove
 ## Repository Structure (Branch: `Lab-1`)
 
 ```
-├── 2548560_Tejas_R_M_TinyML_LAB01_Real_Time_Rotational_Dynamics_Edge_AI_Payload_Safety_System.ipynb
-├── Main_Raw Data.csv
-├── model_float32.tflite
-├── model_int8.tflite
-├── Workflow.png
-└── README.md
+├── 2548560_Tejas_R_M_TinyML_LAB01.ipynb                    # Final corrected implementation notebook
+├── 2548560_Tejas_R_M_TinyML_LAB01_experimentation.ipynb      # Diagnostic & quantization investigation notebook
+├── Main_Raw Data.csv                                         # Raw continuous gyroscope dataset
+├── model_float32.tflite                                      # Final Float32 TFLite model (46.70 KB)
+├── model_int8.tflite                                         # Final Full INT8 TFLite model (20.01 KB)
+├── Workflow.png                                              # Pipeline workflow diagram
+└── README.md                                                 # Project documentation and results
 ```
 
 ---
 
 ## Requirements & Prerequisites
+
 ```bash
 pip install numpy pandas matplotlib seaborn scikit-learn tensorflow
 ```
@@ -249,13 +305,19 @@ pip install numpy pandas matplotlib seaborn scikit-learn tensorflow
 ---
 
 ## How to Run
+
 1. Clone or checkout the `Lab-1` branch:
+
 ```bash
-   git clone -b Lab-1 https://github.com/Tejas2913/TinyML-Lab-2548560.git
+git clone -b Lab-1 https://github.com/Tejas2913/TinyML-Lab-2548560.git
 ```
-2. Open the notebook:
+
+2. Open the final implementation notebook:
+
 ```bash
-   jupyter notebook 2548560_Tejas_R_M_TinyML_LAB01_Real_Time_Rotational_Dynamics_Edge_AI_Payload_Safety_System.ipynb
+jupyter notebook 2548560_Tejas_R_M_TinyML_LAB01.ipynb
 ```
-3. Place `Main_Raw Data.csv` where the notebook expects it. The configuration cell reads `dataset/raw/Main_Raw Data.csv` relative to the working directory.
-4. Run the cells sequentially. The window-size ablation selects the window used by the rest of the pipeline, and the notebook writes figures, processed features, reports and the `.tflite` models to an `outputs/` folder. Exact latency values will differ between machines.
+
+3. Ensure `Main_Raw Data.csv` is available at `dataset/raw/Main_Raw Data.csv` (or in the root folder).
+4. Run all cells sequentially. The notebook executes data validation, ablation, training, Float32/INT8 TFLite conversion, and interpreter benchmarks, saving models and summary reports to `outputs/`.
+5. To explore the diagnostic quantization analysis, open `2548560_Tejas_R_M_TinyML_LAB01_experimentation.ipynb`.
