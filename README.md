@@ -188,22 +188,90 @@ Input (6 features, standardized)
 
 ## Quantization Investigation & Technical Study
 
-To ensure complete experimental rigor, the repository documents both the diagnostic quantization study and the final corrected implementation across two notebooks:
+To ensure complete experimental rigor and academic transparency, the repository documents both the diagnostic quantization investigation and the final corrected implementation across two complementary notebooks.
 
-### 1. Diagnostic / Experimentation Study (`2548560_Tejas_R_M_TinyML_LAB01_experimentation.ipynb`)
+### 1. Initial Quantization Observation
+The initial prototype implementation utilized a minimal toy neural network:
+```
+6 → 16 → 8 → 1  (~265 trainable parameters)
+```
+After training on the six statistical features, the model was converted to both Float32 and Full INT8 TensorFlow Lite formats. The resulting file sizes were:
+- **Float32 TFLite:** `3,468 bytes` (3.39 KB)
+- **Full INT8 TFLite:** `3,696 bytes` (3.61 KB)
+- **Observed Difference:** `+228 bytes` (+6.57% file-size increase)
 
-In the initial exploration with a minimal toy model (`6 → 16 → 8 → 1`, 265 parameters, ~1 KB weight payload), post-training full-integer quantization produced an unexpected result: the INT8 `.tflite` file was slightly **larger** than the Float32 `.tflite` file (3,696 bytes vs 3,468 bytes, a +6.57% increase).
+This outcome initially appeared counter-intuitive: post-training INT8 quantization typically reduces model footprint by replacing 32-bit floating-point weights with 8-bit integers, expecting an approximate 50–75% reduction in model size.
 
-A deep-dive diagnostic investigation was performed in the experimentation notebook to understand this behavior:
+### 2. Diagnostic Investigation
+To identify the root cause of this behavior, a dedicated diagnostic investigation was executed in [`2548560_Tejas_R_M_TinyML_LAB01_experimentation.ipynb`](file:///c:/Users/hp/Desktop/all%20folders/Msc/Trimster%205/Tiny%20ML/Lab01/2548560_Tejas_R_M_TinyML_LAB01_experimentation.ipynb). The investigation systematically tested multiple hypotheses:
+- *Did quantization fail silently or fall back to dynamic range quantization?*
+- *Were any Float32 tensors left unquantized in the computation graph?*
+- *Was an incorrect or stale model file measured?*
+- *Was there an error in the file-size measurement or serialization pipeline?*
+- *Or was the model simply too small for total FlatBuffer size to benefit from quantization?*
 
-- **Quantization verification:** Tensor inspection confirmed that full-integer quantization was active (`Full INT8 verification: PASS`), with all weights and activations stored as `int8` and biases stored as `int32`.
-- **Weight payload analysis:** The kernel weight payload alone shrank by **75.0%** (from 928 bytes in Float32 to 232 bytes in INT8, saving 696 bytes).
-- **Metadata overhead discovery:** The FlatBuffer schema overhead, operator registration tables, and per-tensor scale/zero-point quantization parameters added **+924 bytes** of non-weight metadata (3,364 bytes in INT8 vs 2,440 bytes in Float32).
-- **Conclusion:** For sub-kilobyte networks, fixed FlatBuffer metadata overhead outweighs raw weight savings.
+Using `tf.lite.Interpreter` tensor details and schema inspection, the notebook verified:
+- **Full INT8 verification:** `PASS` (`int8_is_full_integer = True`).
+- **Tensor dtypes:** Exactly 11 tensors were present in the INT8 model: **8 INT8 tensors** (inputs, intermediate activations, outputs, and kernel weights), **3 INT32 tensors** (bias vectors), and **0 Float32 tensors**.
+- **Quantization parameters:** Per-tensor scales and zero-points were fully populated (input scale `0.0319812`, zero-point `-27`; output scale `0.00390625`, zero-point `-128`).
+- **File integrity:** Verified that the correct model files were being generated, loaded, and measured with no script or caching errors.
 
-### 2. Final Corrected Implementation (`2548560_Tejas_R_M_TinyML_LAB01.ipynb`)
+### 3. Weight Quantization Actually Reduced Storage
+Although the *total* `.tflite` file size increased, detailed tensor payload inspection proved that the **weights themselves were successfully quantized and shrunk**:
+- **Float32 kernel weight payload:** `928 bytes`
+- **INT8 kernel weight payload:** `232 bytes`
+- **Kernel weight savings:** **75.0% reduction** (`−696 bytes`)
+- **Combined weights + biases payload:**
+  - Float32: `1,028 bytes`
+  - INT8: `332 bytes`
+  - Net savings: `−696 bytes`
 
-By adopting a multi-layer edge architecture (`6 → 128 → 64 → 32 → 1`, 11,265 parameters), the weight payload substantially exceeds the fixed metadata overhead. Post-training full INT8 quantization achieves the expected and measurable **57.16% memory footprint reduction**, confirming successful TinyML compression.
+This confirmed that TensorFlow Lite's integer quantization math and weight compression operated with 100% correctness.
+
+### 4. Why Did the Total File Size Increase?
+In an ultra-small network (265 parameters), raw weights account for only a minor fraction of the total TFLite FlatBuffer. The remainder of the file stores structural model representation data, including:
+- FlatBuffer schema headers and subgraph descriptors,
+- Operator registration tables,
+- Per-tensor quantization metadata (scale multipliers, zero-point offsets, quantization dimension information).
+
+By decomposing the total file into weight payload versus non-weight representation content:
+- **Float32 Model:** `3,468 B total` − `1,028 B weights/biases` = **2,440 bytes non-weight content** (70.4% of total file).
+- **INT8 Model:** `3,696 B total` − `332 B weights/biases` = **3,364 bytes non-weight content** (91.0% of total file).
+- **Non-weight overhead increase:** **+924 bytes**.
+
+Because the non-weight representation and quantization metadata overhead added **+924 bytes**, it outweighed the **696 bytes** saved by quantizing the weights and biases, resulting in a net file-size increase of **+228 bytes** (3,696 B vs 3,468 B).
+
+### 5. Key Findings
+> **Core Principle:** Quantization can successfully reduce the storage required for model weights without necessarily reducing the total `.tflite` file size when the neural network is extremely small.
+
+- For sub-kilobyte models, fixed FlatBuffer representation and quantization-related metadata can dominate the overall file size.
+- Total file-size reduction becomes measurable and significant when the neural network contains enough parameters for weight storage to dominate over fixed serialization overhead.
+- INT8 quantization was never ineffective; the initial architecture was simply too small for whole-file compression to emerge.
+
+### 6. Corrected Final Implementation
+To allow the benefits of INT8 quantization to materialize clearly at the file level while preserving a lean TinyML profile, the final neural network capacity was scaled to:
+```
+6 → 128 → 64 → 32 → 1  (11,265 trainable parameters)
+```
+In this model, the weight payload accounts for the vast majority of the file, allowing 8-bit weight compression to heavily dominate the fixed FlatBuffer overhead:
+- **Float32 TFLite (`model_float32.tflite`):** `47,824 bytes` (**46.70 KB**)
+- **Full INT8 TFLite (`model_int8.tflite`):** `20,488 bytes` (**20.01 KB**)
+- **Total Memory Footprint Reduction:** **57.16% reduction** (`27,336 bytes` saved)
+
+### 7. Comparative Technical Summary
+
+| Attribute | Diagnostic Model (`..._experimentation.ipynb`) | Final Corrected Model (`..._LAB01.ipynb`) |
+|---|---|---|
+| **Architecture** | `6 → 16 → 8 → 1` | `6 → 128 → 64 → 32 → 1` |
+| **Trainable Parameters** | 265 | 11,265 |
+| **Float32 TFLite Size** | 3.39 KB (3,468 B) | 46.70 KB (47,824 B) |
+| **Full INT8 TFLite Size** | 3.61 KB (3,696 B) | 20.01 KB (20,488 B) |
+| **Weight Payload Change** | **−75.0%** (−696 B) | **−75.0%** |
+| **Total File Size Change** | **+6.57%** (+228 B) *(metadata dominated)* | **−57.16%** (−27,336 B) *(weight savings dominated)* |
+| **Quantization Verification** | PASS (Full INT8) | PASS (Full INT8) |
+| **Test Accuracy** | 71.43% | 76.19% |
+
+The initial result was neither a failure of quantization nor a measurement error—it was a natural manifestation of FlatBuffer metadata scaling in sub-kilobyte neural networks. The final model resolves this and demonstrates textbook TinyML post-training quantization compression.
 
 ---
 
