@@ -1,4 +1,4 @@
-# TinyML Lab 4: Quantization-Aware Training (QAT)
+# TinyML Lab 3: Quantization-Aware Training (QAT)
 
 ## Overview
 This repository contains the implementation and benchmarking for **Lab 4** of the TinyML laboratory course.
